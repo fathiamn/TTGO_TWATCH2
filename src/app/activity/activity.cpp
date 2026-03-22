@@ -44,7 +44,7 @@
 
 // Swap back to monterro_64px once monterro_64px.c is in the build
 LV_IMG_DECLARE(monterro_64px);
-#define APP_ICON  move_64px
+#define APP_ICON  monterro_64px
 
 LV_FONT_DECLARE(Ubuntu_16px);
 LV_FONT_DECLARE(Ubuntu_32px);
