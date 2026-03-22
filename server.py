@@ -1,27 +1,3 @@
-#!/usr/bin/env python3
-"""
-server.py — Monterro Pi Bridge
-═══════════════════════════════════════════════════════════════════════════════
-Handles BLE transport and heartbeat only.
-WiFi path is handled entirely by Apache + PHP + MySQL.
-
-Data flow
-─────────
-  Watch ──WiFi POST──► Apache → post-live.php → MySQL + Supabase broadcast
-  Watch ──BLE (NUS)──► server.py → Supabase broadcast
-  Dashboard load ─────► Supabase DB (live_snapshot, session_history tables)
-
-server.py responsibilities
-──────────────────────────
-  1. BLE  — connect to watch, receive NUS notifications, broadcast to Supabase
-  2. Heartbeat — rebroadcast BLE data every 5 s (WiFi path needs no heartbeat,
-                 PHP broadcasts directly on every POST)
-  3. MySQL sync — poll DB every 5 s for snapshot accuracy only;
-                  never triggers a Supabase broadcast
-
-Requirements:  pip install bleak httpx pymysql
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -48,9 +24,7 @@ try:
 except ImportError:
     MYSQL_AVAILABLE = False
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Configuration
-# ─────────────────────────────────────────────────────────────────────────────
 
 SUPABASE_URL       = "https://sudlejmejjlairgxdlzi.supabase.co"
 SUPABASE_KEY       = (
@@ -70,11 +44,8 @@ DB_PASS            = "monterro_pass"
 
 HISTORY_MAX        = 10
 HEARTBEAT_INTERVAL = 5    # seconds
-SESSION_TIMEOUT_S  = 30   # seconds of silence → expire session_active
+SESSION_TIMEOUT_S  = 30   # seconds of silence before session expired
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Logging
-# ─────────────────────────────────────────────────────────────────────────────
 
 logging.basicConfig(
     level=logging.INFO,
@@ -88,23 +59,9 @@ if not BLE_AVAILABLE:
 if not MYSQL_AVAILABLE:
     log.warning("[MySQL] pymysql not installed — DB sync disabled")
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Shared state
-# ─────────────────────────────────────────────────────────────────────────────
 
 class State:
-    """
-    Thread-safe session state.
-
-    Two timestamps control heartbeat behaviour:
-
-      last_live_ts  — updated by any data arrival (used for session timeout).
-
-      watch_data_ts — updated ONLY by real BLE data, never by MySQL sync.
-                      The heartbeat rebroadcasts only when this is fresh.
-                      If MySQL sync stamped this, the heartbeat would
-                      rebroadcast stale zeros as if they were live data.
-    """
 
     def __init__(self) -> None:
         self._lock           = threading.Lock()
@@ -117,7 +74,7 @@ class State:
         self.last_session    : dict  = {}
         self.history         : deque = deque(maxlen=HISTORY_MAX)
         self.last_live_ts    : float = 0.0
-        self.watch_data_ts   : float = 0.0  # BLE only — NEVER MySQL
+        self.watch_data_ts   : float = 0.0  # BLE only
 
     def update_live(self, steps: int, distance: int, duration: int) -> dict:
         """Called by BLE — stamps both timestamps, sets session_active."""
@@ -139,11 +96,6 @@ class State:
 
     def sync_from_db(self, steps: int, distance: int,
                      duration: int, calories: int) -> None:
-        """
-        Called by MySQL sync — updates display fields ONLY.
-        Deliberately never touches session_active, last_live_ts,
-        or watch_data_ts so the heartbeat cannot be fooled.
-        """
         with self._lock:
             self.steps    = steps
             self.distance = distance
@@ -205,9 +157,7 @@ class State:
 
 state = State()
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Supabase broadcast
-# ─────────────────────────────────────────────────────────────────────────────
 
 _BROADCAST_URL = (
     f"{SUPABASE_URL}/realtime/v1/api/broadcast?apikey={SUPABASE_KEY}"
@@ -239,9 +189,7 @@ def broadcast(event: str, payload: dict) -> None:
 def broadcast_async(event: str, payload: dict) -> None:
     threading.Thread(target=broadcast, args=(event, payload), daemon=True).start()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Data pipeline
-# ─────────────────────────────────────────────────────────────────────────────
+# Data Flow Handlers (called by BLE notifications)
 
 def handle_live_update(steps: int, distance: int, duration: int) -> None:
     log.info("[BLE] live  steps=%-5d dist=%-4dm dur=%ds", steps, distance, duration)
@@ -264,9 +212,7 @@ def handle_watch_connected(connected: bool) -> None:
         log.info("[BLE] connected=%s", connected)
         broadcast_async("status", {"connected": connected})
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Heartbeat  (BLE path only — WiFi broadcasts directly via PHP)
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _heartbeat_tick() -> None:
     snap = state.snapshot()
@@ -282,13 +228,9 @@ def _heartbeat_tick() -> None:
 
     # Status broadcast — always
     broadcast("status", {"connected": snap["connected"]})
-
-    # Live update — only when BLE delivered real data recently.
-    # watch_data_ts is never set by MySQL sync, so this stays silent
-    # on the WiFi path and avoids overwriting PHP's correct broadcasts.
     watch_age = time.monotonic() - state.watch_data_ts
     if snap["live"]["session_active"] and watch_age < SESSION_TIMEOUT_S:
-        broadcast("live_update", snap["live"])
+        broadcast("live_update", snap["live"]) # only live data when session active and recent BLE data
         log.info("[heartbeat] live_update  steps=%d  dist=%dm  dur=%ds",
                  snap["live"]["steps"], snap["live"]["distance"],
                  snap["live"]["duration"])
@@ -309,9 +251,7 @@ def start_heartbeat_thread() -> None:
     threading.Thread(target=_heartbeat_loop, name="heartbeat", daemon=True).start()
     log.info("[heartbeat] started (interval=%ds)", HEARTBEAT_INTERVAL)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# MySQL sync  (display fields only — no broadcast, no session_active changes)
-# ─────────────────────────────────────────────────────────────────────────────
+# MySQL sync (reads latest live_data row to keep in sync with WiFi updates, and also fetches last session)
 
 def sync_state_from_mysql() -> None:
     """
@@ -356,9 +296,7 @@ def sync_state_from_mysql() -> None:
     except Exception as e:
         log.debug("[MySQL] sync error: %s", e)
 
-# ─────────────────────────────────────────────────────────────────────────────
 # BLE — Nordic UART Service (NUS)
-# ─────────────────────────────────────────────────────────────────────────────
 
 _nus_buffer = ""
 _nus_lock   = threading.Lock()
@@ -477,9 +415,7 @@ def start_ble_thread() -> None:
     threading.Thread(target=_run, name="ble-loop", daemon=True).start()
     log.info("[BLE] background thread started")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Entry point
-# ─────────────────────────────────────────────────────────────────────────────
+# Entry point (starts BLE thread, heartbeat thread, and MySQL sync loop)
 
 if __name__ == "__main__":
     log.info("═" * 60)
