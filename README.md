@@ -1,181 +1,274 @@
-<p align="center">
-<img src="https://img.shields.io/github/last-commit/sharandac/My-TTGO-Watch.svg?style=for-the-badge" />
-&nbsp;
-<img src="https://img.shields.io/github/license/sharandac/My-TTGO-Watch.svg?style=for-the-badge" />
-&nbsp;
-<a href="https://www.buymeacoffee.com/sharandac" target="_blank"><img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-%E2%82%AC5-orange?style=for-the-badge&logo=buy-me-a-coffee" /></a>
-</p>
-<hr/>
+# Monterro — Hiking Tour Assistant
 
-# My-TTGO-Watch
+**ELEC-E8408 Embedded Systems Development · Aalto University · 2026**  
+*Bintang Setya, Fathia Nugraha*
 
-A GUI named hedge for smartwatch like devices based on ESP32. Currently support for T-Watch2020 (V1,V2,V3), T-Watch2021  (V1 and V2, no ota-updates), M5Paper, M5Core2, WT32-SC01 and native Linux support for testing.
+---
 
-## Features
+Monterro is a hiking tour assistant built around the LilyGo T-Watch 2020 V2. It tracks your steps, distance, duration, and calories in real time directly on your wrist, then synchronises the data to a Raspberry Pi over Bluetooth or WiFi. A live web dashboard displays everything as you hike.
 
-* BLE communication
-* Time synchronization via BLE
-* Notification via BLE
-* Step counting
-* Wake-up on wrist rotation
-* Quick actions:
+The project was developed as part of the ELEC-E8408 Embedded Systems Development group project at Aalto University, commissioned in the context of a Helsinki City Council brief for Finnish hiking tourism.
 
-  * WiFi
-  * Bluetooth
-  * GPS
-  * Luminosity
-  * Sound volume
+---
 
-* Multiple watch faces:
+## How It Works
 
-  * Embedded (digital)
-  * [Community based watchfaces](https://sharandac.github.io/My-TTGO-Watchfaces/)
+When you start a session on the watch, FreeRTOS runs four concurrent tasks: one reads the BMA423 accelerometer and converts steps to distance, one drives the LVGL display, one sends live data to the Raspberry Pi over Bluetooth (BLE), and one sends the same data over WiFi as a fallback. On the Raspberry Pi, an Apache server with PHP scripts receives the WiFi data and writes it to a MySQL database, while a Python server handles the Bluetooth connection. Both paths broadcast to Supabase Realtime so the web dashboard updates live without a page refresh.
 
-* Multiple 'apps':
-
-  * Music (control the playback of the music on your phone)
-  * Navigation (displays navigation instructions coming from the companion app)
-  * Map (displays a map)
-  * Notification (displays the last notification received)
-  * Stopwatch (with all the necessary functions such as play, pause, stop)
-  * Alarm
-  * Step counter (displays the number of steps and daily objective)
-  * Weather
-  * Calendar
-  * IR remote
-  * ...
-
-* Companion apps: Gadgetbridge
-
-## Install
-
-Clone this repository and open it with platformIO. Select the right env and then build and upload.
-Or follow the great step by step [tutorial](https://www.youtube.com/watch?v=wUGADCnerCs) from [ShotokuTech](https://github.com/ShotokuTech).
-
-Please check out
-    https://github.com/sharandac/My-TTGO-Watch/blob/709ed0c5863435aa966c1d6f44552ddc0909a57c/src/hardware/wifictl.cpp#L256-L261
-to setup your wifi when wps or input via display is not possible.
-
-If you are interested in native Linux support, please install sdl2, curl and mosquitto dev lib and change the env to emulator_* in platformIO.
-
-```bash
-sudo apt-get install libsdl2-dev libcurl4-gnutls-dev libmosquitto-dev build-essential
+```
+T-Watch (ESP32)
+  ├── BLE  ──────────────► server.py ──► Supabase Realtime ──► Dashboard
+  └── WiFi POST ──────────► post-live.php ──► MySQL
+                                          └──► Supabase Realtime ──► Dashboard
+                                          └──► Supabase DB (live_snapshot)
 ```
 
-# Known issues
+When you press STOP, the watch sends the completed session via BLE and WiFi. The Raspberry Pi saves it to MySQL and Supabase, and the dashboard shows the final summary.
 
-* the webserver crashes the ESP32 really often
-* the battery indicator is not accurate, rather a problem with the power management unit ( axp202 )
+---
 
-## Development on the Windows platform
 
-The development tools have a known issue with the size of the project on Windows platforms. When the program is built you may receive the following error:
+## Getting Started
 
-    xtensa-esp32-elf-g++: error: CreateProcess: No such file or directory
-    *** [.pio\build\t-watch2020-v1\firmware.elf] Error 1
+### 1.1 Hardware Requirements
 
-This issue has not been seen on Linux or other platforms. This is a linker issue and can be fixed by removing apps. To remove unneeded apps you can simply delete the appropriate directory in /src/app. Then simply recompile. App can be added in the same way. But note that the app must support autocall_function . This allows the automatic integration of apps without touching the rest of the code ( [the magic behind autocall_function](autocall.md) ).
+- LilyGo T-Watch 2020 V2
+- Raspberry Pi 400 with power adapter, SD card, and HDMI cable
+- USB cable (USB-A to micro-USB)
+- WiFi router — ensure both devices are connected to the same local network
 
-Since each app includes a different set of files, you may need to delete several apps to reduce it small enough for the Windows build.
+---
 
-# How to use
+### 1.2 Watch Firmware Setup
 
-Cf. [Usage](USAGE.md)
+**Step 1** — Install [Visual Studio Code](https://code.visualstudio.com/) along with the PlatformIO extension.
 
-# Forks that are recommended
+**Step 2** — Clone the repository:
 
-[Pickelhaupt](https://github.com/Pickelhaupt/EUC-Dash-ESP32)<br>
-[FantasyFactory](https://github.com/FantasyFactory/My-TTGO-Watch)<br>
-[NorthernDIY](https://github.com/NorthernDIY/My-TTGO-Watch)<br>
-[linuxthor](https://github.com/linuxthor/Hackers-TTGO-Watch)<br>
-[d03n3rfr1tz3](https://github.com/d03n3rfr1tz3/TTGO.T-Watch.2020)<br>
-[lunokjod](https://github.com/lunokjod/watch)<br>
+```bash
+git clone https://github.com/fathiamn/TTGO_TWATCH2
+```
 
-# For the programmers
+**Step 3** — Open the `TTGO_TWATCH2` folder in Visual Studio Code with PlatformIO.
 
-Cf. [contribution guide](CONTRIBUTING.md)<br>
-app autocall function [the magic behind autocall_function](autocall.md) or add a app without touching the rest
+**Step 4** — Open `platformio.ini` and set the upload port for your Raspberry Pi:
 
-# Interface
+```ini
+upload_port = /dev/ttyACM1
+upload_speed = 115200
+```
 
-## TTGO T-Watch 2020
+> The port may be `/dev/ttyACM0` or `/dev/ttyACM1` depending on which USB port you are using. Check with `ls /dev/ttyACM*` on the Raspberry Pi terminal.
 
-![screenshot](images/screen1.png)
-![screenshot](images/screen2.png)
-![screenshot](images/screen3.png)
-![screenshot](images/screen4.png)
-![screenshot](images/screen5.png)
-![screenshot](images/screen6.png)
-![screenshot](images/screen7.png)
-![screenshot](images/screen8.png)
-![screenshot](images/screen9.png)
-![screenshot](images/screen10.png)
-![screenshot](images/screen11.png)
-![screenshot](images/screen12.png)
+**Step 5** — In `src/hardware/wifictl.cpp`, set your WiFi credentials and Raspberry Pi IP address:
 
-## M5Paper ( downscaled )
+```cpp
+const char* WIFI_SSID = "your_wifi";
+const char* WIFI_PASS = "your_password";
+const char* RPI_URL   = "http://192.168.x.x:5000/update";
+```
 
-![screenshot](images/image1.png)
-![screenshot](images/image2.png)
-![screenshot](images/image3.png)
+**Step 6** — Hold the watch's crown button with the USB plugged in, then build and upload:
 
-## M5Core2
+```bash
+pio run --target upload
+```
 
-![screenshot](images/m5core2_img1.png)
-![screenshot](images/m5core2_img2.png)
-![screenshot](images/m5core2_img3.png)
-![screenshot](images/m5core2_img4.png)
+---
 
-## WT32-SC01
+### 1.3 Raspberry Pi Setup
 
-![screenshot](images/WT32_SC01_img1.png)
-![screenshot](images/WT32_SC01_img2.png)
-![screenshot](images/WT32_SC01_img3.png)
+**Step 1** — Install Python dependencies:
 
-## TTGO T-Watch 2021
+```bash
+pip install flask flask-cors bleak realtime zeroconf --break-system-packages
+```
 
-![screenshot](images/twatch2021_img1.png)
-![screenshot](images/twatch2021_img2.png)
-![screenshot](images/twatch2021_img3.png)
+**Step 2** — Install Apache, PHP, and MySQL:
 
-# Contributors
+```bash
+sudo apt install apache2 mysql-server php php-mysql php-curl -y
+```
 
-Special thanks to the following people for their help:
+**Step 3** — Set up the database:
 
-[5tormChild](https://github.com/5tormChild)<br>
-[bwagstaff](https://github.com/bwagstaff)<br>
-[chrismcna](https://github.com/chrismcna)<br>
-[datacute](https://github.com/datacute)<br>
-[fliuzzi02](https://github.com/fliuzzi02)<br>
-[guyou](https://github.com/guyou)<br>
-[jakub-vesely](https://github.com/jakub-vesely)<br>
-[joshvito](https://github.com/joshvito)<br>
-[JoanMCD](https://github.com/JoanMCD)<br>
-[NorthernDIY](https://github.com/NorthernDIY)<br>
-[Neuroplant](https://github.com/Neuroplant)<br>
-[paulstueber](https://github.com/paulstueber)<br>
-[pavelmachek](https://github.com/pavelmachek)<br>
-[rnisthal](https://github.com/rnisthal)<br>
-[ssspeq](https://github.com/ssspeq)<br>
+```bash
+sudo mysql < setup_db.sql
+```
 
-and the following projects:
+**Step 4** — Deploy the PHP files:
 
-[ArduinoJson](https://github.com/bblanchon/ArduinoJson)<br>
-[AsyncTCP](https://github.com/me-no-dev/AsyncTCP)<br>
-[ESP32SSDP](https://github.com/luc-github/ESP32SSDP)<br>
-[ESP32-targz](https://github.com/tobozo/ESP32-targz)<br>
-[ESP8266Audio](https://github.com/earlephilhower/ESP8266Audio)<br>
-[ESPAsyncWebServer](https://github.com/me-no-dev/ESPAsyncWebServer)<br>
-[LVGL](https://github.com/lvgl)<br>
-[NimBLE-Arduino]()h2zero/NimBLE-Arduino<br>
-[pubsubclient](https://github.com/knolleary/pubsubclient)<br>
-[TinyGPSPlus](mikalhart/TinyGPSPlus)<br>
-[TFT_eSPI](https://github.com/Bodmer/TFT_eSPI)<br>
-[TTGO_TWatch_Library](https://github.com/Xinyuan-LilyGO/TTGO_TWatch_Library)<br>
+```bash
+sudo mkdir -p /var/www/html/monterro
+sudo cp post-live.php post-end.php get-current.php /var/www/html/monterro/
+```
 
-Every Contribution to this repository is highly welcome! Don't fear to create pull requests which enhance or fix the project, you are going to help everybody.
-<p>
-If you want to donate to the author then you can buy me a coffee.
-<br/><br/>
-<a href="https://www.buymeacoffee.com/sharandac" target="_blank"><img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-%E2%82%AC5-orange?style=for-the-badge&logo=buy-me-a-coffee" /></a>
-</p>
+**Step 5** — Run the server:
+
+```bash
+python3 server.py
+```
+
+---
+
+### 1.4 Supabase Setup
+
+**Step 1** — Create an account or log in at [supabase.com](https://supabase.com).
+
+**Step 2** — Create a new project. From **Settings → API**, copy your project's public URL and anon key.
+
+**Step 3** — Create the required tables by running the following in the **SQL Editor**:
+
+```sql
+create table live_snapshot (
+  id         int primary key default 1,
+  steps      int default 0,
+  distance   int default 0,
+  duration   int default 0,
+  calories   int default 0,
+  updated_at timestamptz default now()
+);
+
+create table session_history (
+  id         bigserial primary key,
+  steps      int,
+  distance   int,
+  duration   int,
+  calories   int,
+  ended_at   timestamptz default now()
+);
+
+insert into live_snapshot (id) values (1);
+```
+
+**Step 4** — Enable Row Level Security by running in the SQL Editor:
+
+```sql
+alter table live_snapshot   enable row level security;
+alter table session_history enable row level security;
+
+create policy "public_all_live_snapshot"
+  on live_snapshot for all
+  using (true) with check (true);
+
+create policy "public_all_session_history"
+  on session_history for all
+  using (true) with check (true);
+```
+
+Then enable Realtime for both tables:
+
+```sql
+alter publication supabase_realtime add table live_snapshot;
+alter publication supabase_realtime add table session_history;
+```
+
+**Step 5** — In `dashboard.html`, update the Supabase credentials with your own project values:
+
+```javascript
+const SUPABASE_URL = "https://your-project-id.supabase.co";
+const SUPABASE_KEY = "your-anon-public-key";
+```
+
+---
+
+## Database Structure
+
+### MySQL on Raspberry Pi
+
+**`live_data`** — inserted every 5 seconds during an active session via `post-live.php`:
+
+| Column | Type | Description |
+|---|---|---|
+| id | INT UNSIGNED AUTO_INCREMENT | Primary key |
+| steps | INT UNSIGNED | Current step count |
+| distance | INT UNSIGNED | Distance in metres |
+| duration | INT UNSIGNED | Session time in seconds |
+| calories | INT UNSIGNED | Estimated calories — steps × 4 ÷ 100 |
+| source | VARCHAR(8) | `'wifi'` or `'ble'` |
+| received_at | TIMESTAMP | Row insertion time |
+
+**`sessions`** — one row per completed hike, inserted by `post-end.php` when STOP is pressed:
+
+| Column | Type | Description |
+|---|---|---|
+| id | INT UNSIGNED AUTO_INCREMENT | Primary key |
+| steps | INT UNSIGNED | Total steps for the session |
+| distance | INT UNSIGNED | Total distance in metres |
+| duration | INT UNSIGNED | Total duration in seconds |
+| calories | INT UNSIGNED | Total calories burned |
+| ended_at | TIMESTAMP | Session end time |
+
+### Supabase DB
+
+**`live_snapshot`** — single row (id=1), upserted on every WiFi tick by `post-live.php`. The dashboard reads this on page load because it is hosted on Vercel (HTTPS) and cannot fetch from the Raspberry Pi (HTTP) directly due to mixed content restrictions:
+
+| Column | Type | Description |
+|---|---|---|
+| id | INT (fixed = 1) | Single row, always overwritten |
+| steps | INT | Latest step count |
+| distance | INT | Latest distance in metres |
+| duration | INT | Latest session duration in seconds |
+| calories | INT | Latest calories |
+| updated_at | TIMESTAMPTZ | Last update time |
+
+**`session_history`** — one row per completed session, inserted by `post-end.php`. Used by the dashboard to display past hike history:
+
+| Column | Type | Description |
+|---|---|---|
+| id | BIGSERIAL | Primary key |
+| steps | INT | Total steps |
+| distance | INT | Total distance in metres |
+| duration | INT | Total duration in seconds |
+| calories | INT | Total calories |
+| ended_at | TIMESTAMPTZ | Session end time |
+
+### SPIFFS on Watch
+
+**`/hike_log.jsonl`** — one JSON line appended per session to the watch's internal flash memory, regardless of network connectivity:
+
+| Field | Description |
+|---|---|
+| ts | Unix timestamp of session end |
+| stp | Total steps |
+| dst | Distance in metres |
+| dur | Duration in seconds |
+| kcal | Calories burned |
+
+---
+
+## Communication Architecture
+
+The system uses two parallel data channels:
+
+**Bluetooth Low Energy (primary)** — the watch connects to the Raspberry Pi using `server.py` and the Bleak library, subscribing to the Nordic UART Service (NUS) TX characteristic (`6e400003-b5a3-f393-e0a9-e50e24dcca9e`). JSON messages are sent as newline-terminated strings.
+
+Live message format:
+```json
+{"type": "live", "steps": 1234, "distance": 617, "duration": 480}
+```
+
+Session end message format:
+```json
+{"type": "end", "steps": 1234, "distance": 617, "duration": 480, "history": [...]}
+```
+
+**WiFi HTTP POST (bonus / fallback)** — the watch sends form-encoded POST requests to Apache on the Raspberry Pi every 5 seconds. An API key (`monterro2026`) is included with every request for basic authentication. The WiFi channel activates automatically when BLE is disconnected, ensuring data continues to reach the Raspberry Pi regardless of proximity.
+
+- Live endpoint: `POST /monterro/post-live.php`
+- Session end endpoint: `POST /monterro/post-end.php`
+
+---
+
+## Known Limitations
+
+- The watch may reboot when BLE disconnects unexpectedly. Session data is preserved in SPIFFS on the watch so nothing is lost, but the reboot itself is a known issue to be addressed in future firmware versions.
+- Calories are estimated using a simplified formula (`steps × 4 ÷ 100`) and do not account for user weight, height, or terrain.
+- The `live_data` MySQL table grows indefinitely — older rows are kept for debugging but never read by the dashboard. A cleanup routine should be added for long-term use.
+- Live dashboard updates require an internet connection to Supabase. If the network has no internet access, the dashboard will still show the last known state from `live_snapshot` on page load.
+
+---
+
+## License
+
+This project was developed for academic purposes at Aalto University. Hardware was provided by the ELEC-E8408 course and must be returned after the project period.
