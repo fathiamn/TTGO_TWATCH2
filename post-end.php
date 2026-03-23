@@ -1,18 +1,5 @@
 <?php
-/**
- * post-end.php — Monterro session-end endpoint
- * Place at: /var/www/html/monterro/post-end.php
- *
- * Called by activity.cpp → post_session_end() when Stop is pressed.
- * Form fields:  api_key, steps, distance, duration
- *               history_N_steps, history_N_distance, history_N_duration,
- *               history_N_calories   (N = 0 … HISTORY_MAX-1, newest first)
- *
- * Actions:
- *   1. Validate API key
- *   2. Insert into sessions table
- *   3. Broadcast session_end to Supabase with history array
- */
+/* © 2026 Monterro · Fathia & Bintang. All rights reserved. */
 
 // ── Configuration (keep in sync with post-live.php) ─────────────────────────
 define('API_KEY',       'monterro2026');
