@@ -39,8 +39,6 @@ $duration = intval($_POST['duration'] ?? 0);
 $calories = intval($steps * 4 / 100);
 
 // ── Parse history array ───────────────────────────────────────────────────────
-// Watch sends history_0_steps, history_0_distance … history_9_calories
-// newest-first (index 0 = most recent session, which is the one just ended).
 $history = [];
 for ($i = 0; $i < HISTORY_MAX; $i++) {
     $hs = intval($_POST["history_{$i}_steps"]    ?? -1);
