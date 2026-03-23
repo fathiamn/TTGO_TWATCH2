@@ -1,5 +1,6 @@
 <?php
 /* © 2026 Monterro · Fathia & Bintang. All rights reserved. */
+?>
 
 // ── Configuration (keep in sync with post-live.php) ─────────────────────────
 define('API_KEY',       'monterro2026');
