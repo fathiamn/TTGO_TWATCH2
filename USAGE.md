@@ -38,7 +38,7 @@ home/YOUR_RASPBERRYPI_USER/YOUR_FILE_NAME/python3 server.py
 
 2.3 Dashboard 
 
-If you want to see the updates on Monterro website, go to this website and create your account. The website will direct you automatically to the dashboard. The same data will be displayed on both watch and website: https://monterro.vercel.app/35 
+If you want to see the updates on Monterro website, go to this website and create your account. The website will direct you automatically to the dashboard. The same data will be displayed on both watch and website: https://monterro.vercel.app/ 
 
 3. Using the Watch
 
