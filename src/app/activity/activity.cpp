@@ -1,6 +1,7 @@
 /*
 © 2026 Monterro · Fathia & Bintang. All rights reserved.
 */
+
 #include "config.h"
 #include "quickglui/quickglui.h"
 #include "activity.h"
@@ -26,8 +27,8 @@
     #endif
 #endif
 
-LV_IMG_DECLARE(monterro_64px);
-#define APP_ICON  monterro_64px
+LV_IMG_DECLARE(move_64px);
+#define APP_ICON  move_64px
 
 LV_FONT_DECLARE(Ubuntu_16px);
 LV_FONT_DECLARE(Ubuntu_32px);
@@ -37,7 +38,7 @@ LV_FONT_DECLARE(Ubuntu_32px);
 
 // ── Pi connection ─────────────────────────────────────────────────────────────
 #define PI_FALLBACK_IP  "192.168.0.112"   // ← set your Pi's actual local IP
-#define PI_PORT         5000
+#define PI_API_KEY      "monterro2026"
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 #define COL_BG        LV_COLOR_MAKE(0xF4,0xF5,0xF7)
@@ -133,6 +134,7 @@ static uint32_t get_step_len_cm();
 static uint32_t calc_pace(uint32_t dur_s, uint32_t dist_m);
 static IPAddress resolve_pi_addr();
 static bool post_live_update(uint32_t stp, uint32_t dist, uint32_t dur);
+static bool post_session_end(uint32_t stp, uint32_t dist, uint32_t dur);
 static void spiffs_save_session(uint32_t steps, uint32_t dist, uint32_t dur);
 static void spiffs_load_history();
 
@@ -152,6 +154,7 @@ static uint32_t get_step_len_cm() {
     return (v == 0) ? 50 : v;
 }
 
+// FIX 6 — threshold 2 m, not 10 m
 static uint32_t calc_pace(uint32_t dur_s, uint32_t dist_m) {
     if (dist_m < 2 || dur_s == 0) return 0;
     return (dur_s * 1000u) / dist_m;
@@ -173,9 +176,10 @@ static void tile_opaque(lv_obj_t *t) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 static void spiffs_save_session(uint32_t steps, uint32_t dist, uint32_t dur) {
+    // ── RAM ring-buffer ───────────────────────────────────────────────────────
     const uint8_t used = (history_count < HISTORY_MAX)
                          ? history_count : HISTORY_MAX - 1;
-    for (int i = used; i > 0; i--)          // always shift, regardless of count
+    for (int i = used; i > 0; i--)
         history[i] = history[i - 1];
 
     history[0].steps           = steps;
@@ -236,16 +240,15 @@ static void spiffs_load_history() {
         }
     }
     f.close();
-
-    // Parse newest-first into history[]
+    
     history_count = 0;
     for (int i = total - 1; i >= 0 && history_count < HISTORY_MAX; i--) {
-        uint32_t stp = 0, dst = 0, dur = 0, kcal = 0;
+        unsigned long stp = 0, dst = 0, dur = 0, kcal = 0;
         long ts = 0;
         int matched = sscanf(lines[i],
             "{\"ts\":%ld,\"stp\":%lu,\"dst\":%lu,\"dur\":%lu,\"kcal\":%lu}",
             &ts, &stp, &dst, &dur, &kcal);
-        if (matched < 4 || dur == 0) continue;   // skip zero-lines or corrupt data
+        if (matched < 4 || dur == 0) continue;
         history[history_count].steps           = stp;
         history[history_count].dist_m          = dst;
         history[history_count].dur_s           = dur;
@@ -279,13 +282,15 @@ static bool post_live_update(uint32_t stp, uint32_t dist, uint32_t dur) {
     IPAddress piAddr = resolve_pi_addr();
     if ((uint32_t)piAddr == 0) return false;
 
-    char url[64];
+    char url[80];
     snprintf(url, sizeof(url),
-             "http://%s:%d/live", piAddr.toString().c_str(), PI_PORT);
+             "http://%s/monterro/post-live.php",
+             piAddr.toString().c_str());
 
-    char body[96];
+    char body[160];
     snprintf(body, sizeof(body),
-             "{\"steps\":%lu,\"distance\":%lu,\"duration\":%lu}",
+             "api_key=%s&steps=%lu&distance=%lu&duration=%lu",
+             PI_API_KEY,
              (unsigned long)stp,
              (unsigned long)dist,
              (unsigned long)dur);
@@ -293,10 +298,50 @@ static bool post_live_update(uint32_t stp, uint32_t dist, uint32_t dur) {
     HTTPClient http;
     http.setTimeout(2000);
     http.begin(url);
-    http.addHeader("Content-Type", "application/json");
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
     int code = http.POST((uint8_t*)body, strlen(body));
     http.end();
-    log_i("[monterro] POST %s → %d", url, code);
+    log_i("[monterro] POST live → %s  code=%d", url, code);
+    return (code >= 200 && code < 300);
+}
+
+
+static bool post_session_end(uint32_t stp, uint32_t dist, uint32_t dur) {
+    IPAddress piAddr = resolve_pi_addr();
+    if ((uint32_t)piAddr == 0) return false;
+
+    char url[80];
+    snprintf(url, sizeof(url),
+             "http://%s/monterro/post-end.php",
+             piAddr.toString().c_str());
+
+    String body;
+    body.reserve(1024);
+    body  = "api_key=";
+    body += PI_API_KEY;
+    body += "&steps=";    body += String(stp);
+    body += "&distance="; body += String(dist);
+    body += "&duration="; body += String(dur);
+
+    for (int i = 0; i < history_count; i++) {
+        body += "&history_"; body += String(i); body += "_steps=";
+        body += String(history[i].steps);
+        body += "&history_"; body += String(i); body += "_distance=";
+        body += String(history[i].dist_m);
+        body += "&history_"; body += String(i); body += "_duration=";
+        body += String(history[i].dur_s);
+        body += "&history_"; body += String(i); body += "_calories=";
+        body += String(history[i].kcal);
+    }
+
+    HTTPClient http;
+    http.setTimeout(4000);
+    http.begin(url);
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+    int code = http.POST((uint8_t*)body.c_str(), body.length());
+    http.end();
+    log_i("[monterro] POST end  → %s  code=%d  history=%d",
+          url, code, history_count);
     return (code >= 200 && code < 300);
 }
 
@@ -311,10 +356,12 @@ void activity_app_setup() {
     build_main_page();
     build_history_page();
     build_settings();
-    if (!SPIFFS.begin(true)) {
-        log_e("[monterro] SPIFFS mount failed — history will not persist");
-    }
-    spiffs_load_history();   // restore sessions from flash on boot
+
+    spiffs_load_history();
+
+    // Keep WiFi always on
+    wifictl_set_autoon( true );
+
     lv_task_create(task_display_cb, 1000, LV_TASK_PRIO_LOW, nullptr);
     lv_task_create(task_telem_cb,   5000, LV_TASK_PRIO_LOW, nullptr);
 
@@ -325,10 +372,27 @@ void activity_app_setup() {
 // Tasks
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Display task — label/arc updates
 static void task_display_cb(lv_task_t *t) {
     (void)t;
     if (!tile_active || !lbl_dur_val) return;
     refresh_main_page();
+}
+
+static volatile bool post_busy = false;
+
+struct LiveArgs {
+    uint32_t stp, dist, dur;
+};
+
+static void post_live_task(void *pv) {
+    LiveArgs *a = static_cast<LiveArgs*>(pv);
+
+    post_live_update(a->stp, a->dist, a->dur);
+
+    delete a;
+    post_busy = false;
+    vTaskDelete(nullptr);
 }
 
 static void task_telem_cb(lv_task_t *t) {
@@ -344,13 +408,18 @@ static void task_telem_cb(lv_task_t *t) {
         blestepctl_update_hike(false);
     }
 
-    // Request WiFi on if not already connected
     if (!wifictl_get_event(WIFICTL_CONNECT)) {
-        wifictl_on();   // ask the system to connect
-        return;         // will send next tick once connected
+        return;
     }
 
-    post_live_update(stp, dist, dur);
+    if (post_busy) return;
+    post_busy = true;
+
+    LiveArgs *args = new LiveArgs{stp, dist, dur};
+    if (xTaskCreate(post_live_task, "post_live", 4096, args, 1, nullptr) != pdPASS) {
+        delete args;
+        post_busy = false;
+    }
 }
 
 static void activity_activate_cb() {
@@ -359,10 +428,13 @@ static void activity_activate_cb() {
     refresh_main_page();
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Build main tile
+// ─────────────────────────────────────────────────────────────────────────────
+
 void build_main_page() {
     lv_obj_t *tile = mainbar_get_tile_obj(activityApp.mainTileId());
 
-    // Background — FIX 5: LV_OPA_COVER mandatory or mainbar dark bg shows through
     lv_style_init(&sty_bg);
     lv_style_set_bg_color(&sty_bg,     LV_STATE_DEFAULT, COL_BG);
     lv_style_set_bg_opa(&sty_bg,       LV_STATE_DEFAULT, LV_OPA_COVER);
@@ -432,7 +504,7 @@ void build_main_page() {
     lv_obj_add_style(lbl_dur_val, LV_LABEL_PART_MAIN, &sty_timer);
     lv_obj_align(lbl_dur_val, tile, LV_ALIGN_IN_TOP_MID, 0, 20);
 
-    // Arc positions
+    // Arc positions 
     const lv_coord_t SM=64, LG=80, YCTR=100, G=6;
     const lv_coord_t XD=10,       XS=10+SM+G,     XK=10+SM+G+LG+G;
     const lv_coord_t CXD=XD+SM/2, CXS=XS+LG/2,   CXK=XK+SM/2;
@@ -455,7 +527,8 @@ void build_main_page() {
     MK_ARC(arc_steps, sty_arc_steps, XS, YCTR-LG/2, LG)
     MK_ARC(arc_kcal,  sty_arc_kcal,  XK, YCTR-SM/2, SM)
 #undef MK_ARC
-    
+
+    // Value labels
     lbl_dist_val = lv_label_create(tile, NULL);
     lv_label_set_text(lbl_dist_val, "0");
     lv_obj_add_style(lbl_dist_val, LV_LABEL_PART_MAIN, &sty_val);
@@ -471,6 +544,7 @@ void build_main_page() {
     lv_obj_add_style(lbl_kcal_val, LV_LABEL_PART_MAIN, &sty_val);
     lv_obj_align(lbl_kcal_val, arc_kcal, LV_ALIGN_CENTER, 0, 0);
 
+    // Column headers
     const lv_coord_t CW=76;
 #define COL(txt,st,cx,y) { \
     lv_obj_t *_l=lv_label_create(tile,NULL); \
@@ -485,6 +559,7 @@ void build_main_page() {
     COL("KCAL",     sty_ckcal,  CXK, 148)
 #undef COL
 
+    // Pace row
     lv_obj_t *pt = lv_label_create(tile, NULL);
     lv_label_set_text(pt, LV_SYMBOL_BULLET " PACE");
     lv_obj_add_style(pt, LV_LABEL_PART_MAIN, &sty_pace);
@@ -500,6 +575,7 @@ void build_main_page() {
     lv_obj_add_style(pu, LV_LABEL_PART_MAIN, &sty_muted);
     lv_obj_set_pos(pu, 160, 176);
 
+    // Separator
     lv_obj_t *sep = lv_obj_create(tile, NULL);
     lv_obj_reset_style_list(sep, LV_OBJ_PART_MAIN);
     lv_obj_add_style(sep, LV_OBJ_PART_MAIN, &sty_sep);
@@ -507,6 +583,7 @@ void build_main_page() {
     lv_obj_set_pos(sep, 10, 190);
     lv_obj_set_click(sep, false);
 
+    // Buttons
     const lv_coord_t BW=68, BH=30, BG=6, BY=200;
     lv_coord_t bx=12;
 
@@ -712,6 +789,7 @@ static void btn_startstop_cb(lv_obj_t *obj, lv_event_t event) {
         session_steps       = 0;
         session_distance_m  = 0;
         session_duration_s  = 0;
+        post_busy           = false;
         session_running     = true;
         cache_invalidate();
         blestepctl_set_hike_active(true);
@@ -727,17 +805,31 @@ static void btn_startstop_cb(lv_obj_t *obj, lv_event_t event) {
                                      ? (live_steps - session_start_steps) : 0;
         const uint32_t final_dist  = final_steps * step_len_cm / 100;
         const uint32_t final_dur   = (millis() - session_start_ms) / 1000;
+
         session_steps      = final_steps;
         session_distance_m = final_dist;
         session_duration_s = final_dur;
+        post_busy          = false; 
         session_running    = false;
-
-        blestepctl_send_hike_end(final_steps, final_dist, final_dur);
         blestepctl_set_hike_active(false);
-        
+
         if (final_dur > 0) {
             spiffs_save_session(final_steps, final_dist, final_dur);
-            refresh_history_page();   // update label immediately
+            refresh_history_page();
+
+            if (blectl_get_event(BLECTL_CONNECT) &&
+                !blectl_get_event(BLECTL_DISCONNECT)) {
+                blestepctl_send_hike_end(final_steps, final_dist, final_dur);
+            } else {
+                struct EndArgs { uint32_t stp, dist, dur; };
+                EndArgs *args = new EndArgs{ final_steps, final_dist, final_dur };
+                xTaskCreate([](void *pv) {
+                    EndArgs *a = static_cast<EndArgs*>(pv);
+                    post_session_end(a->stp, a->dist, a->dur);
+                    delete a;
+                    vTaskDelete(nullptr);
+                }, "post_end", 4096, args, 1, nullptr);
+            }
         }
 
         if (lbl_startstop)
@@ -786,6 +878,16 @@ static void activity_reset_cb(lv_obj_t *obj, lv_event_t event) {
                 if (lbl_startstop)
                     lv_label_set_text(lbl_startstop, LV_SYMBOL_PLAY " Start");
             }
+
+            // ── Clear session history ─────────────────────────────────────────
+            memset(history, 0, sizeof(history));
+            history_count = 0;
+            if (SPIFFS.exists(HIKE_LOG)) {
+                SPIFFS.remove(HIKE_LOG);
+                log_i("[monterro] hike log cleared");
+            }
+            refresh_history_page();
+
             bma_reset_stepcounter();
             cache_invalidate();
             refresh_main_page();
